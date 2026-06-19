@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useState, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import {
     Droplets, Home, Users, TrendingUp,
-    TrendingDown, Wrench, AlertCircle, CheckCircle2, ArrowUpRight, ArrowDownRight
+    TrendingDown, Wrench, AlertCircle, CheckCircle2, ArrowUpRight, ArrowDownRight,
+    ChevronDown, CalendarDays
 } from 'lucide-react';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -65,38 +67,123 @@ function StatCard({ icon: Icon, label, value, sub, color, index, trend }) {
     );
 }
 
+// Year range: 5 years back to current year
+const currentYear = new Date().getFullYear();
+const YEAR_OPTIONS = Array.from({ length: currentYear - 2019 }, (_, i) => currentYear - i);
+
+function YearSelector({ year, onChange }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    return (
+        <div ref={ref} className="relative">
+            <button
+                onClick={() => setOpen(o => !o)}
+                className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white/80 dark:bg-white/5 border border-slate-200 dark:border-white/10 backdrop-blur-md text-navy-950 dark:text-white font-black text-sm shadow-sm hover:border-navy-900/30 dark:hover:border-gold-500/30 hover:shadow-md transition-all duration-300 group"
+            >
+                <CalendarDays size={15} className="text-gold-500" />
+                <span className="tracking-tight">{year}</span>
+                <ChevronDown
+                    size={14}
+                    className={`text-slate-400 transition-transform duration-300 ${open ? 'rotate-180 text-gold-500' : ''}`}
+                />
+            </button>
+
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                        transition={{ duration: 0.15, ease: 'easeOut' }}
+                        className="absolute right-0 top-full mt-2 w-36 z-50 bg-white dark:bg-navy-900 border border-slate-100 dark:border-white/10 rounded-2xl shadow-2xl shadow-slate-200/60 dark:shadow-black/60 overflow-hidden"
+                    >
+                        <div className="p-1.5">
+                            <p className="px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">
+                                Select Year
+                            </p>
+                            {YEAR_OPTIONS.map(y => (
+                                <button
+                                    key={y}
+                                    onClick={() => { onChange(y); setOpen(false); }}
+                                    className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-black transition-all duration-200 ${
+                                        y === year
+                                            ? 'bg-navy-900 dark:bg-gold-500 text-white dark:text-navy-950'
+                                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
+                                    }`}
+                                >
+                                    {y}
+                                    {y === currentYear && (
+                                        <span className={`ml-2 text-[9px] font-black uppercase tracking-widest ${
+                                            y === year ? 'text-white/60 dark:text-navy-950/60' : 'text-gold-500'
+                                        }`}>
+                                            NOW
+                                        </span>
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
 export default function Dashboard() {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [summary, setSummary] = useState(null);
     const [tanks, setTanks] = useState([]);
     const [subStats, setSubStats] = useState(null);
-    const year = new Date().getFullYear();
+    const [year, setYear] = useState(currentYear);
+
+    const isAdmin = user?.role === 'system_admin' || user?.role === 'zonal_admin';
+
+    const fetchData = async (selectedYear, isRefresh = false) => {
+        if (isRefresh) setRefreshing(true);
+        else setLoading(true);
+        try {
+            const [fin, tnk, sub] = await Promise.all([
+                financeAPI.getYearSummary(selectedYear),
+                tankAPI.getAll(),
+                subscriptionAPI.getAll(),
+            ]);
+            setSummary(fin.data);
+            setTanks(tnk.data.tanks || []);
+
+            const subs = sub.data.subscriptions || [];
+            const yearSubs = subs.filter(s => s.year == selectedYear);
+            setSubStats({
+                total: yearSubs.length,
+                paid: yearSubs.filter(s => s.status === 'paid').length,
+                partial: yearSubs.filter(s => s.status === 'partial').length,
+                unpaid: yearSubs.filter(s => s.status === 'unpaid').length,
+            });
+        } catch (error) {
+            console.error("Dashboard fetchData error:", error);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
 
     useEffect(() => {
-        const fetch = async () => {
-            try {
-                const [fin, tnk, sub] = await Promise.all([
-                    financeAPI.getYearSummary(year),
-                    tankAPI.getAll(),
-                    subscriptionAPI.getAll(),
-                ]);
-                setSummary(fin.data);
-                setTanks(tnk.data.tanks || []);
-
-                const subs = sub.data.subscriptions || [];
-                const currentYear = subs.filter(s => s.year == year);
-                setSubStats({
-                    total: currentYear.length,
-                    paid: currentYear.filter(s => s.status === 'paid').length,
-                    partial: currentYear.filter(s => s.status === 'partial').length,
-                    unpaid: currentYear.filter(s => s.status === 'unpaid').length,
-                });
-            } catch { }
-            finally { setLoading(false); }
-        };
-        fetch();
+        fetchData(year);
     }, []);
+
+    const handleYearChange = (newYear) => {
+        setYear(newYear);
+        fetchData(newYear, true);
+    };
 
     if (loading) {
         return (
@@ -148,18 +235,77 @@ export default function Dashboard() {
                 <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="flex flex-wrap gap-3"
+                    className="flex flex-wrap gap-3 items-center"
                 >
-                    <button className="btn-secondary px-4 md:px-6">
+                    {/* Year Selector — admins only */}
+                    {isAdmin && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 hidden sm:block">
+                                Viewing
+                            </span>
+                            <YearSelector year={year} onChange={handleYearChange} />
+                        </div>
+                    )}
+
+                    <button
+                        onClick={() => navigate('/finance/subscriptions')}
+                        className="btn-secondary px-4 md:px-6"
+                    >
                         <AlertCircle size={16} />
                         <span className="hidden sm:inline">View</span> Alerts
                     </button>
-                    <button className="btn-primary px-4 md:px-6">
+                    <button
+                        onClick={() => navigate('/reports')}
+                        className="btn-primary px-4 md:px-6"
+                    >
                         <TrendingUp size={16} />
                         <span className="hidden sm:inline">Financial</span> Report
                     </button>
                 </motion.div>
             </div>
+
+            {/* Year Banner (shown when not current year) */}
+            <AnimatePresence>
+                {year !== currentYear && (
+                    <motion.div
+                        key={year}
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                    >
+                        <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-gold-500/8 dark:bg-gold-500/10 border border-gold-500/20">
+                            <CalendarDays size={14} className="text-gold-500 shrink-0" />
+                            <p className="text-[12px] font-black text-gold-700 dark:text-gold-400 uppercase tracking-widest">
+                                Historical view — Showing data for fiscal year <span className="text-gold-500">{year}</span>
+                            </p>
+                            <button
+                                onClick={() => handleYearChange(currentYear)}
+                                className="ml-auto text-[10px] font-black uppercase tracking-widest text-gold-600 dark:text-gold-400 hover:text-gold-700 transition-colors shrink-0"
+                            >
+                                Return to current →
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Refreshing overlay */}
+            <AnimatePresence>
+                {refreshing && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="flex items-center gap-3 px-5 py-2.5 rounded-2xl bg-navy-900/5 dark:bg-white/5 border border-slate-100 dark:border-white/5 w-fit"
+                    >
+                        <div className="w-3 h-3 rounded-full bg-gold-500 animate-ping" />
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                            Fetching {year} data...
+                        </p>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Stat Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
@@ -211,7 +357,9 @@ export default function Dashboard() {
                             <h3 className="text-lg font-black text-navy-950 dark:text-white tracking-tight">
                                 Revenue Compliance
                             </h3>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Status Overview {year}</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                Status Overview {year}
+                            </p>
                         </div>
                         <div className="w-10 h-10 rounded-2xl bg-slate-50 dark:bg-white/5 flex items-center justify-center">
                             <Users size={18} className="text-slate-400" />
@@ -260,6 +408,20 @@ export default function Dashboard() {
                                 </PieChart>
                             </ResponsiveContainer>
                         )}
+                    </div>
+
+                    {/* Year legend strip */}
+                    <div className="mt-4 pt-4 border-t border-slate-50 dark:border-white/5 grid grid-cols-3 gap-2">
+                        {[
+                            { label: 'Paid', value: subStats?.paid || 0, color: 'text-emerald-500' },
+                            { label: 'Partial', value: subStats?.partial || 0, color: 'text-gold-500' },
+                            { label: 'Unpaid', value: subStats?.unpaid || 0, color: 'text-rose-500' },
+                        ].map(item => (
+                            <div key={item.label} className="text-center">
+                                <p className={`text-lg font-black ${item.color}`}>{item.value}</p>
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</p>
+                            </div>
+                        ))}
                     </div>
                 </motion.div>
 

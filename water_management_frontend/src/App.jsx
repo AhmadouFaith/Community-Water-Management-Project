@@ -3,9 +3,11 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import Layout from './components/layout/Layout';
 import Login from './pages/auth/Login';
+import Signup from './pages/auth/Signup';
 import Dashboard from './pages/dashboard/Dashboard';
 import Spinner from './components/ui/Spinner';
 import Landing from './pages/Landing';
+import NotFound from './pages/NotFound';
 
 // Lazy pages
 import { lazy, Suspense } from 'react';
@@ -44,6 +46,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
+      <Route path="/signup" element={user ? <Navigate to="/dashboard" /> : <Signup />} />
 
       <Route path="/dashboard" element={
         <ProtectedRoute>
@@ -122,12 +125,12 @@ function AppRoutes() {
         </ProtectedRoute>
       } />
       <Route path="/my-subscription" element={
-        <ProtectedRoute roles={['representative']}>
+        <ProtectedRoute roles={['representative', 'user']}>
           <Layout><Suspense fallback={<div className="flex justify-center py-20"><Spinner /></div>}><MySubscription /></Suspense></Layout>
         </ProtectedRoute>
       } />
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

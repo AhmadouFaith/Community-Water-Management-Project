@@ -36,7 +36,7 @@ export default function Landing() {
 
     const handleCTA = () => {
         if (user) navigate('/dashboard');
-        else navigate('/login');
+        else navigate('/signup');
     };
 
     return (
@@ -60,9 +60,14 @@ export default function Landing() {
                 </div>
                 <div className="flex items-center gap-4 sm:gap-8">
                     {!user && (
-                        <button onClick={() => navigate('/login')} className="text-sm font-black text-slate-500 dark:text-slate-400 hover:text-navy-950 dark:hover:text-gold-500 transition-colors hidden sm:block">
-                            Already Registered?
-                        </button>
+                        <div className="flex items-center gap-4 hidden sm:flex">
+                            <button onClick={() => navigate('/login')} className="text-sm font-black text-slate-500 dark:text-slate-400 hover:text-navy-950 dark:hover:text-gold-500 transition-colors">
+                                Already Registered?
+                            </button>
+                            <button onClick={() => navigate('/signup')} className="text-sm font-black text-navy-950 dark:text-gold-500 hover:text-navy-700 dark:hover:text-gold-400 transition-colors">
+                                Sign Up
+                            </button>
+                        </div>
                     )}
                     <button 
                         onClick={handleCTA}

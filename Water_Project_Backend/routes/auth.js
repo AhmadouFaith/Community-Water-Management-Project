@@ -211,4 +211,78 @@ router.get('/me', authMiddleware, async (req, res) => {
 });
 
 
+// --------------------------------------------------------
+// GET /api/auth/zones
+// Public route — used to populate the zone dropdown during registration
+// --------------------------------------------------------
+router.get('/zones', async (req, res) => {
+  try {
+    const [zones] = await db.query(
+      `SELECT id, name FROM water_zone WHERE is_active = 1 ORDER BY name`
+    );
+    res.status(200).json({ zones });
+  } catch (err) {
+    console.error('Public zones fetch error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+
+// --------------------------------------------------------
+// POST /api/auth/signup
+// Public route — user self-registration as representative
+// --------------------------------------------------------
+router.post('/signup', async (req, res) => {
+  const { username, email, password, zone_id } = req.body;
+
+  try {
+    // 1. Validation
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email, and password are required.' });
+    }
+
+    // 2. Hash Password
+    const password_hash = await bcrypt.hash(password, 12);
+
+    // 3. Insert user (Default role: user, must_change_password: 0)
+    const [result] = await db.query(
+      `INSERT INTO user 
+         (zone_id, username, email, password_hash, role, must_change_password, is_active)
+       VALUES (?, ?, ?, ?, 'user', 0, 1)`,
+      [zone_id ? parseInt(zone_id) : null, username, email, password_hash]
+    );
+
+    const userId = result.insertId;
+
+    // 4. Audit Log
+    await db.query(
+      `INSERT INTO audit_log 
+         (user_id, action, table_name, record_id, new_values, ip_address, user_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        'user.signup',
+        'user',
+        userId,
+        JSON.stringify({ username, email, role: 'user', zone_id }),
+        getClientIp(req),
+        req.headers['user-agent'] || null
+      ]
+    );
+
+    res.status(201).json({
+      message: 'Registration successful! You can now log in.',
+      id: userId
+    });
+
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Username or email already exists.' });
+    }
+    console.error('Signup error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+
 module.exports = router;

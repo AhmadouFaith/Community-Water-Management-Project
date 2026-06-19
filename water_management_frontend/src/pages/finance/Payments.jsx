@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
-import { Plus, ReceiptText, Search } from 'lucide-react';
-import { paymentAPI, subscriptionAPI } from '../../services/api';
+import { Plus, ReceiptText, Search, Download } from 'lucide-react';
+import { paymentAPI, subscriptionAPI, committeeAPI, reportAPI } from '../../services/api';
 import PageHeader from '../../components/ui/PageHeader';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 export default function Payments() {
     const [payments, setPayments] = useState([]);
     const [subscriptions, setSubscriptions] = useState([]);
+    const [committee, setCommittee] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [modal, setModal] = useState(false);
@@ -20,9 +21,14 @@ export default function Payments() {
 
     const load = async () => {
         try {
-            const [p, s] = await Promise.all([paymentAPI.getAll(), subscriptionAPI.getAll()]);
+            const [p, s, c] = await Promise.all([
+                paymentAPI.getAll(),
+                subscriptionAPI.getAll(),
+                committeeAPI.getAll(),
+            ]);
             setPayments(p.data.payments || []);
             setSubscriptions(s.data.subscriptions || []);
+            setCommittee(c.data.committee || []);
         } catch { toast.error('Failed to load payments'); }
         finally { setLoading(false); }
     };
@@ -37,7 +43,7 @@ export default function Payments() {
     };
 
     const filtered = payments.filter(p =>
-        `${p.household_address} ${p.payment_method}`
+        `${p.household_address} ${p.payment_method} ${p.zone_name || ''}`
             .toLowerCase().includes(search.toLowerCase())
     );
 
@@ -45,7 +51,7 @@ export default function Payments() {
         <div>
             <PageHeader
                 title="Subscription Payments"
-                description="Record and view household payments"
+                description="Record and view household subscription payments"
                 action={
                     <button onClick={() => { reset(); setModal(true); }}
                         className="btn-primary flex items-center gap-2">
@@ -73,7 +79,9 @@ export default function Payments() {
                                     <th className="text-left px-4 py-3 hidden sm:table-cell">Date</th>
                                     <th className="text-right px-4 py-3">Amount (FCFA)</th>
                                     <th className="text-left px-4 py-3 hidden md:table-cell">Method</th>
-                                    <th className="text-left px-4 py-3 hidden lg:table-cell">Received By</th>
+                                    <th className="text-left px-4 py-3 hidden lg:table-cell">Reference</th>
+                                    <th className="text-left px-4 py-3 hidden xl:table-cell">Received By</th>
+                                    <th className="text-center px-4 py-3">Receipt</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -83,7 +91,7 @@ export default function Payments() {
                                         transition={{ delay: i * 0.03 }} className="table-row">
                                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
                                             {p.household_address}
-                                            <p className="text-xs text-gray-400 dark:text-gray-500">{p.year}</p>
+                                            <p className="text-xs text-gray-400 dark:text-gray-500">{p.zone_name} · {p.year}</p>
                                         </td>
                                         <td className="px-4 py-3 text-gray-500 dark:text-gray-300 hidden sm:table-cell">
                                             {p.payment_date}
@@ -94,8 +102,28 @@ export default function Payments() {
                                         <td className="px-4 py-3 text-gray-500 dark:text-gray-300 capitalize hidden md:table-cell">
                                             {p.payment_method?.replace('_', ' ')}
                                         </td>
-                                        <td className="px-4 py-3 text-gray-500 dark:text-gray-300 hidden lg:table-cell">
+                                        <td className="px-4 py-3 text-gray-400 dark:text-gray-500 hidden lg:table-cell">
+                                            {p.reference || '—'}
+                                        </td>
+                                        <td className="px-4 py-3 text-gray-500 dark:text-gray-300 hidden xl:table-cell">
                                             {p.received_by_name || '—'}
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                            <button
+                                                onClick={() => window.open(reportAPI.paymentReceipt(p.id), '_blank')}
+                                                title="Download Payment Receipt"
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                                                           text-xs font-bold
+                                                           bg-navy-50 dark:bg-white/5
+                                                           text-navy-900 dark:text-gold-400
+                                                           border border-navy-100 dark:border-white/10
+                                                           hover:bg-navy-900 hover:text-white
+                                                           dark:hover:bg-gold-500 dark:hover:text-navy-950
+                                                           transition-all duration-200 group"
+                                            >
+                                                <Download size={12} className="group-hover:-translate-y-0.5 transition-transform" />
+                                                Receipt
+                                            </button>
                                         </td>
                                     </motion.tr>
                                 ))}
@@ -122,7 +150,8 @@ export default function Payments() {
                         <div>
                             <label className="label">Amount (FCFA) *</label>
                             <input {...register('amount', { required: 'Required', min: 1 })}
-                                type="number" className="input" />
+                                type="number" className="input" placeholder="Enter amount" />
+                            {errors.amount && <p className="text-xs text-red-500 mt-1">Amount is required</p>}
                         </div>
                         <div>
                             <label className="label">Payment Date *</label>
@@ -139,7 +168,18 @@ export default function Payments() {
                         </div>
                         <div>
                             <label className="label">Reference / Receipt No.</label>
-                            <input {...register('reference_number')} className="input" placeholder="Optional" />
+                            <input {...register('reference')} className="input" placeholder="Optional" />
+                        </div>
+                        <div className="sm:col-span-2">
+                            <label className="label">Received By (Committee Member)</label>
+                            <select {...register('received_by')} className="input">
+                                <option value="">Select member (optional)</option>
+                                {committee.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.first_name} {c.last_name} — {c.role}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
                         <div className="sm:col-span-2">
                             <label className="label">Notes</label>

@@ -14,7 +14,7 @@ const navItems = [
         label: 'Dashboard',
         icon: LayoutDashboard,
         to: '/dashboard',
-        roles: ['system_admin', 'zonal_admin', 'representative'],
+        roles: ['system_admin', 'zonal_admin', 'representative', 'user'],
     },
     {
         label: 'Infrastructure',
@@ -59,7 +59,7 @@ const navItems = [
         label: 'My Subscription',
         icon: CreditCard,
         to: '/my-subscription',
-        roles: ['representative'],
+        roles: ['representative', 'user'],
     },
 ];
 

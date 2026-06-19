@@ -62,7 +62,7 @@
   }
 
   .stat-card {
-    @apply card p-6 relative overflow-hidden group hover:border-navy-900/10 dark:hover:border-gold-500/30;
+    @apply bg-white/80 dark:bg-navy-900/60 border border-white dark:border-white/5 backdrop-blur-xl rounded-[2rem] shadow-xl shadow-slate-200/50 dark:shadow-black/40 transition-all duration-300 p-6 relative overflow-hidden hover:border-navy-900/10 dark:hover:border-gold-500/30;
   }
 
   /* Modern Inputs */
@@ -85,7 +85,7 @@
 
   /* Sidebar Styling */
   .sidebar-link {
-    @apply flex items-center gap-3.5 px-5 py-3 rounded-2xl text-[14px] font-bold text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-white/5 hover:text-navy-900 dark:hover:text-gold-400 transition-all duration-300 group;
+    @apply flex items-center gap-3.5 px-5 py-3 rounded-2xl text-[14px] font-bold text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-white/5 hover:text-navy-900 dark:hover:text-gold-400 transition-all duration-300;
   }
 
   .sidebar-link-active {
@@ -97,11 +97,11 @@
     @apply inline-flex items-center px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest;
   }
 
-  .badge-paid { @apply badge bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400; }
-  .badge-partial { @apply badge bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-400; }
-  .badge-unpaid { @apply badge bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-400; }
-  .badge-active { @apply badge bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-400; }
-  .badge-inactive { @apply badge bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-500; }
+  .badge-paid { @apply inline-flex items-center px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400; }
+  .badge-partial { @apply inline-flex items-center px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-400; }
+  .badge-unpaid { @apply inline-flex items-center px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-400; }
+  .badge-active { @apply inline-flex items-center px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-400; }
+  .badge-inactive { @apply inline-flex items-center px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-500; }
 }
 
 @layer utilities {

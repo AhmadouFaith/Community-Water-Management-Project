@@ -33,6 +33,8 @@ export const authAPI = {
     login: (data) => api.post('/auth/login', data),
     logout: () => api.post('/auth/logout'),
     me: () => api.get('/auth/me'),
+    signup: (data) => api.post('/auth/signup', data),
+    getPublicZones: () => api.get('/auth/zones'),
 };
 
 // ── INFRASTRUCTURE ───────────────────────────────────────────
@@ -109,6 +111,7 @@ export const paymentAPI = {
     getAll: () => api.get('/finance/payments'),
     getBySubscription: (id) => api.get(`/finance/payments/subscription/${id}`),
     create: (data) => api.post('/finance/payments', data),
+    initiateFapshiPayment: (data) => api.post('/finance/fapshi/pay', data),
 };
 
 export const maintenanceAPI = {
@@ -143,6 +146,8 @@ export const reportAPI = {
         `${REPORT_BASE}/annual-finance?year=${year}&format=${format}`,
     subscriptionStatement: (householdId, year, format = 'pdf') =>
         `${REPORT_BASE}/subscription-statement?householdId=${householdId}&year=${year}&format=${format}`,
+    paymentReceipt: (paymentId, format = 'pdf') =>
+        `${REPORT_BASE}/payment-receipt?paymentId=${paymentId}&format=${format}`,
     maintenanceCost: (year, format = 'pdf') =>
         `${REPORT_BASE}/maintenance-cost?year=${year}&format=${format}`,
     overdueSubscriptions: (year, format = 'pdf') =>

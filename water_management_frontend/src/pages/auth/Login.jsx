@@ -13,11 +13,14 @@ export default function Login() {
     const navigate = useNavigate();
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [authError, setAuthError] = useState('');
 
     const { register, handleSubmit, formState: { errors } } = useForm();
 
     const onSubmit = async (data) => {
         setLoading(true);
+        setAuthError('');
+
         try {
             const result = await login(data);
             toast.success(`Welcome back, ${result.user.username}!`);
@@ -26,7 +29,9 @@ export default function Login() {
             }
             navigate('/dashboard');
         } catch (err) {
-            toast.error(err.response?.data?.error || 'Login failed. Please try again.');
+            const message = err.response?.data?.error || 'Login failed. Please try again.';
+            setAuthError(message);
+            toast.error(message);
         } finally {
             setLoading(false);
         }
@@ -55,32 +60,39 @@ export default function Login() {
                 transition={{ duration: 0.4 }}
                 className="w-full max-w-sm"
             >
-                {/* Logo */}
-                <div className="flex flex-col items-center mb-8">
-                    <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{ type: 'spring', delay: 0.1 }}
-                        className="w-16 h-16 rounded-2xl bg-navy-900 dark:bg-gold-500
-                       flex items-center justify-center mb-4 shadow-lg"
+                <div className="card p-6 shadow-xl text-center">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/')}
+                        className="group mx-auto flex flex-col items-center mb-5 focus:outline-none"
                     >
-                        <Waves size={30} className="text-white dark:text-navy-950" />
-                    </motion.div>
-                    <h1 className="text-2xl font-bold text-navy-900 dark:text-white">
-                        AquaCam Connect
-                    </h1>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Water Management System
-                    </p>
-                </div>
+                        <motion.div
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', delay: 0.1 }}
+                            className="w-16 h-16 rounded-2xl bg-navy-900 dark:bg-gold-500
+                               flex items-center justify-center mb-4 shadow-lg transition-transform duration-200"
+                        >
+                            <Waves size={30} className="text-white dark:text-navy-950" />
+                        </motion.div>
+                        <h1 className="text-2xl font-bold text-navy-900 dark:text-white">
+                            AquaCam Connect
+                        </h1>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Water Management System
+                        </p>
+                    </button>
 
-                {/* Form */}
-                <div className="card p-6 shadow-xl">
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-5">
                         Sign in to your account
                     </h2>
 
-                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 text-center">
+                        {authError && (
+                            <div className="rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 text-sm font-medium">
+                                {authError}
+                            </div>
+                        )}
                         <div>
                             <label className="label">Username or Email</label>
                             <input
@@ -132,6 +144,17 @@ export default function Login() {
                             ) : 'Sign In'}
                         </motion.button>
                     </form>
+
+                    <p className="mt-5 text-sm text-center text-gray-500 dark:text-gray-400">
+                        Don’t have an account?{' '}
+                        <button
+                            type="button"
+                            onClick={() => navigate('/signup')}
+                            className="font-semibold text-navy-950 dark:text-gold-400 hover:underline"
+                        >
+                            Sign up
+                        </button>
+                    </p>
                 </div>
 
                 <p className="text-center text-xs text-gray-400 dark:text-gray-600 mt-6">

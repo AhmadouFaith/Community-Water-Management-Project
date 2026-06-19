@@ -15,17 +15,23 @@ router.use(authMiddleware);
 
 // GET /api/people/households — get all households
 router.get('/households', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
-    const [households] = await db.query(
-      `SELECT h.*, z.name AS zone_name
-       FROM household h
-       JOIN water_zone z ON z.id = h.zone_id
-       WHERE h.deleted_at IS NULL
-       ORDER BY z.name, h.street_address`
-    );
+    const query = req.user.role === 'zonal_admin'
+      ? `SELECT h.*, z.name AS zone_name
+         FROM household h
+         JOIN water_zone z ON z.id = h.zone_id
+         WHERE h.deleted_at IS NULL AND h.zone_id = ?
+         ORDER BY z.name, h.street_address`
+      : `SELECT h.*, z.name AS zone_name
+         FROM household h
+         JOIN water_zone z ON z.id = h.zone_id
+         WHERE h.deleted_at IS NULL
+         ORDER BY z.name, h.street_address`;
+    const params = req.user.role === 'zonal_admin' ? [req.user.zone_id] : [];
+    const [households] = await db.query(query, params);
     res.status(200).json({ households });
   } catch (err) {
     console.error(err.message);
@@ -47,8 +53,10 @@ router.get('/households/:id', async (req, res) => {
     if (households.length === 0) {
       return res.status(404).json({ error: 'Household not found.' });
     }
-    // If representative, make sure they only see their own household
-    if (req.user.role === 'representative') {
+    if (req.user.role === 'zonal_admin' && households[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+    if (['representative', 'user'].includes(req.user.role)) {
       const [member] = await db.query(
         `SELECT household_id FROM community_member WHERE id = ?`,
         [req.user.member_id]
@@ -66,7 +74,7 @@ router.get('/households/:id', async (req, res) => {
 
 // POST /api/people/households — create a household
 router.post('/households', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { zone_id, house_number, street_address, landmark,
@@ -105,7 +113,7 @@ router.post('/households', async (req, res) => {
 
 // PUT /api/people/households/:id — update a household
 router.put('/households/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -117,8 +125,14 @@ router.put('/households/:id', async (req, res) => {
       return res.status(404).json({ error: 'Household not found.' });
     }
     const h = existing[0];
+    if (req.user.role === 'zonal_admin' && h.zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only update households in your zone.' });
+    }
     const { zone_id, house_number, street_address, landmark,
             member_count, connection_date, is_active } = req.body;
+    if (req.user.role === 'zonal_admin' && zone_id && zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You cannot move a household to another zone.' });
+    }
     await db.query(
       `UPDATE household SET
          zone_id = ?, house_number = ?, street_address = ?,
@@ -163,6 +177,9 @@ router.delete('/households/:id', async (req, res) => {
     if (existing.length === 0) {
       return res.status(404).json({ error: 'Household not found.' });
     }
+    if (req.user.role === 'zonal_admin' && existing[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only delete households in your zone.' });
+    }
     await db.query(
       `UPDATE household SET deleted_at = NOW() WHERE id = ?`,
       [req.params.id]
@@ -188,18 +205,25 @@ router.delete('/households/:id', async (req, res) => {
 
 // GET /api/people/members — get all members
 router.get('/members', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
-    const [members] = await db.query(
-      `SELECT cm.*, h.street_address, h.house_number, z.name AS zone_name
-       FROM community_member cm
-       JOIN household h    ON h.id  = cm.household_id
-       JOIN water_zone z   ON z.id  = h.zone_id
-       WHERE cm.deleted_at IS NULL
-       ORDER BY cm.last_name, cm.first_name`
-    );
+    const query = req.user.role === 'zonal_admin'
+      ? `SELECT cm.*, h.street_address, h.house_number, z.name AS zone_name
+         FROM community_member cm
+         JOIN household h    ON h.id  = cm.household_id
+         JOIN water_zone z   ON z.id  = h.zone_id
+         WHERE cm.deleted_at IS NULL AND h.zone_id = ?
+         ORDER BY cm.last_name, cm.first_name`
+      : `SELECT cm.*, h.street_address, h.house_number, z.name AS zone_name
+         FROM community_member cm
+         JOIN household h    ON h.id  = cm.household_id
+         JOIN water_zone z   ON z.id  = h.zone_id
+         WHERE cm.deleted_at IS NULL
+         ORDER BY cm.last_name, cm.first_name`;
+    const params = req.user.role === 'zonal_admin' ? [req.user.zone_id] : [];
+    const [members] = await db.query(query, params);
     res.status(200).json({ members });
   } catch (err) {
     console.error(err.message);
@@ -209,7 +233,7 @@ router.get('/members', async (req, res) => {
 
 // GET /api/people/members/:id — get one member
 router.get('/members/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -224,6 +248,9 @@ router.get('/members/:id', async (req, res) => {
     if (members.length === 0) {
       return res.status(404).json({ error: 'Member not found.' });
     }
+    if (req.user.role === 'zonal_admin' && members[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
     res.status(200).json({ member: members[0] });
   } catch (err) {
     console.error(err.message);
@@ -234,6 +261,15 @@ router.get('/members/:id', async (req, res) => {
 // GET /api/people/households/:id/members — get all members of a household
 router.get('/households/:id/members', async (req, res) => {
   try {
+    if (req.user.role === 'zonal_admin') {
+      const [households] = await db.query(
+        `SELECT zone_id FROM household WHERE id = ? AND deleted_at IS NULL`,
+        [req.params.id]
+      );
+      if (households.length === 0 || households[0].zone_id !== req.user.zone_id) {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
+    }
     const [members] = await db.query(
       `SELECT * FROM community_member
        WHERE household_id = ? AND deleted_at IS NULL
@@ -249,7 +285,7 @@ router.get('/households/:id/members', async (req, res) => {
 
 // POST /api/people/members — add a new member
 router.post('/members', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { household_id, first_name, last_name, phone, email,
@@ -258,6 +294,15 @@ router.post('/members', async (req, res) => {
     return res.status(400).json({
       error: 'household_id, first_name and last_name are required.'
     });
+  }
+  if (req.user.role === 'zonal_admin') {
+    const [households] = await db.query(
+      `SELECT zone_id FROM household WHERE id = ? AND deleted_at IS NULL`,
+      [household_id]
+    );
+    if (households.length === 0 || households[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only add members to households in your zone.' });
+    }
   }
   try {
     const [result] = await db.query(
@@ -298,18 +343,24 @@ router.post('/members', async (req, res) => {
 
 // PUT /api/people/members/:id — update a member
 router.put('/members/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
     const [existing] = await db.query(
-      `SELECT * FROM community_member WHERE id = ? AND deleted_at IS NULL`,
+      `SELECT cm.*, h.zone_id
+       FROM community_member cm
+       JOIN household h ON h.id = cm.household_id
+       WHERE cm.id = ? AND cm.deleted_at IS NULL`,
       [req.params.id]
     );
     if (existing.length === 0) {
       return res.status(404).json({ error: 'Member not found.' });
     }
     const m = existing[0];
+    if (req.user.role === 'zonal_admin' && m.zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only update members in your zone.' });
+    }
     const { first_name, last_name, phone, email, national_id,
             gender, date_of_birth, is_active } = req.body;
     await db.query(
@@ -346,16 +397,22 @@ router.put('/members/:id', async (req, res) => {
 
 // DELETE /api/people/members/:id — soft delete
 router.delete('/members/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
     const [existing] = await db.query(
-      `SELECT * FROM community_member WHERE id = ? AND deleted_at IS NULL`,
+      `SELECT cm.*, h.zone_id
+       FROM community_member cm
+       JOIN household h ON h.id = cm.household_id
+       WHERE cm.id = ? AND cm.deleted_at IS NULL`,
       [req.params.id]
     );
     if (existing.length === 0) {
       return res.status(404).json({ error: 'Member not found.' });
+    }
+    if (req.user.role === 'zonal_admin' && existing[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only delete members in your zone.' });
     }
     if (existing[0].is_representative === 1) {
       return res.status(400).json({
@@ -398,17 +455,27 @@ router.delete('/members/:id', async (req, res) => {
 // GET /api/people/committee — get all committee members
 router.get('/committee', async (req, res) => {
   try {
-    const [committee] = await db.query(
-      `SELECT cm.*, 
+    const query = req.user.role === 'zonal_admin'
+      ? `SELECT cm.*, 
               c.first_name, c.last_name, c.phone, c.email,
               h.street_address, z.name AS zone_name
-       FROM committee_member cm
-       JOIN community_member c ON c.id  = cm.member_id
-       JOIN household h        ON h.id  = c.household_id
-       JOIN water_zone z       ON z.id  = h.zone_id
-       WHERE cm.is_active = 1
-       ORDER BY cm.role`
-    );
+         FROM committee_member cm
+         JOIN community_member c ON c.id  = cm.member_id
+         JOIN household h        ON h.id  = c.household_id
+         JOIN water_zone z       ON z.id  = h.zone_id
+         WHERE cm.is_active = 1 AND h.zone_id = ?
+         ORDER BY cm.role`
+      : `SELECT cm.*, 
+              c.first_name, c.last_name, c.phone, c.email,
+              h.street_address, z.name AS zone_name
+         FROM committee_member cm
+         JOIN community_member c ON c.id  = cm.member_id
+         JOIN household h        ON h.id  = c.household_id
+         JOIN water_zone z       ON z.id  = h.zone_id
+         WHERE cm.is_active = 1
+         ORDER BY cm.role`;
+    const params = req.user.role === 'zonal_admin' ? [req.user.zone_id] : [];
+    const [committee] = await db.query(query, params);
     res.status(200).json({ committee });
   } catch (err) {
     console.error(err.message);
@@ -433,6 +500,9 @@ router.get('/committee/:id', async (req, res) => {
     if (committee.length === 0) {
       return res.status(404).json({ error: 'Committee member not found.' });
     }
+    if (req.user.role === 'zonal_admin' && committee[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
     res.status(200).json({ committee_member: committee[0] });
   } catch (err) {
     console.error(err.message);
@@ -442,7 +512,7 @@ router.get('/committee/:id', async (req, res) => {
 
 // POST /api/people/committee — add a committee member
 router.post('/committee', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { member_id, role, start_date } = req.body;
@@ -450,6 +520,17 @@ router.post('/committee', async (req, res) => {
     return res.status(400).json({
       error: 'member_id, role and start_date are required.'
     });
+  }
+  if (req.user.role === 'zonal_admin') {
+    const [members] = await db.query(
+      `SELECT h.zone_id FROM community_member cm
+       JOIN household h ON h.id = cm.household_id
+       WHERE cm.id = ? AND cm.deleted_at IS NULL`,
+      [member_id]
+    );
+    if (members.length === 0 || members[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only assign committee members in your zone.' });
+    }
   }
   try {
     const [result] = await db.query(
@@ -478,17 +559,24 @@ router.post('/committee', async (req, res) => {
 
 // PUT /api/people/committee/:id — update a committee member
 router.put('/committee/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
     const [existing] = await db.query(
-      `SELECT * FROM committee_member WHERE id = ?`, [req.params.id]
+      `SELECT cm.*, h.zone_id
+       FROM committee_member cm
+       JOIN community_member c ON c.id = cm.member_id
+       JOIN household h ON h.id = c.household_id
+       WHERE cm.id = ?`, [req.params.id]
     );
     if (existing.length === 0) {
       return res.status(404).json({ error: 'Committee member not found.' });
     }
     const c = existing[0];
+    if (req.user.role === 'zonal_admin' && c.zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only update committee members in your zone.' });
+    }
     const { role, start_date, end_date, is_active } = req.body;
     await db.query(
       `UPDATE committee_member SET
@@ -519,15 +607,22 @@ router.put('/committee/:id', async (req, res) => {
 
 // DELETE /api/people/committee/:id — deactivate a committee member
 router.delete('/committee/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
     const [existing] = await db.query(
-      `SELECT * FROM committee_member WHERE id = ?`, [req.params.id]
+      `SELECT cm.*, h.zone_id
+       FROM committee_member cm
+       JOIN community_member c ON c.id = cm.member_id
+       JOIN household h ON h.id = c.household_id
+       WHERE cm.id = ?`, [req.params.id]
     );
     if (existing.length === 0) {
       return res.status(404).json({ error: 'Committee member not found.' });
+    }
+    if (req.user.role === 'zonal_admin' && existing[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only deactivate committee members in your zone.' });
     }
     await db.query(
       `UPDATE committee_member
@@ -586,20 +681,30 @@ router.get('/users', async (req, res) => {
 
 // GET /api/people/users/zonal — get all zonal admins
 router.get('/users/zonal', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
-    const [users] = await db.query(
-      `SELECT u.id, u.username, u.email, u.role,
+    const query = req.user.role === 'zonal_admin'
+      ? `SELECT u.id, u.username, u.email, u.role,
               u.zone_id, u.is_active, u.last_login_at,
               z.name AS zone_name
-       FROM user u
-       LEFT JOIN water_zone z ON z.id = u.zone_id
-       WHERE u.role = 'zonal_admin'
-         AND u.deleted_at IS NULL
-       ORDER BY z.name`
-    );
+         FROM user u
+         LEFT JOIN water_zone z ON z.id = u.zone_id
+         WHERE u.role = 'zonal_admin'
+           AND u.deleted_at IS NULL
+           AND u.zone_id = ?
+         ORDER BY z.name`
+      : `SELECT u.id, u.username, u.email, u.role,
+              u.zone_id, u.is_active, u.last_login_at,
+              z.name AS zone_name
+         FROM user u
+         LEFT JOIN water_zone z ON z.id = u.zone_id
+         WHERE u.role = 'zonal_admin'
+           AND u.deleted_at IS NULL
+         ORDER BY z.name`;
+    const params = req.user.role === 'zonal_admin' ? [req.user.zone_id] : [];
+    const [users] = await db.query(query, params);
     res.status(200).json({ zonal_admins: users });
   } catch (err) {
     console.error(err.message);
@@ -609,7 +714,7 @@ router.get('/users/zonal', async (req, res) => {
 
 // POST /api/people/users — create a new user
 router.post('/users', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { member_id, zone_id, username, email, password, role } = req.body;
@@ -654,7 +759,7 @@ router.post('/users', async (req, res) => {
 
 // DELETE /api/people/users/:id — soft delete a user
 router.delete('/users/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {

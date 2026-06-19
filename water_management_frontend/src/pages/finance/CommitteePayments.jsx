@@ -149,7 +149,7 @@ export default function CommitteePayments() {
                         </div>
                         <div>
                             <label className="label">Reference</label>
-                            <input {...register('reference_number')} className="input" placeholder="Optional" />
+                            <input {...register('reference')} className="input" placeholder="Optional" />
                         </div>
                         <div className="sm:col-span-2">
                             <label className="label">Description</label>

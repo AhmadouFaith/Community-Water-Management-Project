@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useForm } from 'react-hook-form';
-import { Plus, CreditCard, Search, Calendar, MapPin, Users, ArrowUpRight, DollarSign } from 'lucide-react';
+import { Plus, CreditCard, Search, Calendar, Building2, Users, ArrowUpRight, DollarSign, Home } from 'lucide-react';
 import { subscriptionAPI, householdAPI, rateAPI } from '../../services/api';
 import PageHeader from '../../components/ui/PageHeader';
 import Modal from '../../components/ui/Modal';
@@ -217,35 +217,29 @@ export default function Subscriptions() {
                             </div>
                         </div>
 
-                        <div>
-                            <label className="label">Occupancy Scale *</label>
-                            <div className="relative">
-                                <Users size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                                <input {...register('member_count', { required: 'Required', min: 1 })}
-                                    type="number" className="input pl-11" placeholder="Active occupants" />
+                        <div className="flex flex-col justify-center">
+                            <label className="label">Active Rates</label>
+                            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10">
+                                {rates.length === 0 ? (
+                                    <p className="text-[11px] text-rose-500 font-bold">No rates configured — create a rate first.</p>
+                                ) : (
+                                    rates.slice(0, 3).map(r => (
+                                        <p key={r.id} className="text-[12px] font-black text-slate-700 dark:text-slate-300">
+                                            {r.year}: FCFA {Number(r.rate_per_person).toLocaleString()}/person
+                                        </p>
+                                    ))
+                                )}
                             </div>
-                        </div>
-
-                        <div className="sm:col-span-2">
-                            <label className="label">Applicable Rate *</label>
-                            <div className="relative">
-                                <DollarSign size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                                <select {...register('rate_id', { required: 'Required' })} className="input pl-11">
-                                    <option value="">Select active financial rate...</option>
-                                    {rates.map(r => (
-                                        <option key={r.id} value={r.id}>
-                                            FCFA {Number(r.rate_per_person).toLocaleString()} /Person ({r.year})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            {errors.rate_id && <p className="text-[10px] font-black text-rose-500 mt-2 px-1 uppercase tracking-wider">{errors.rate_id.message}</p>}
                         </div>
                     </div>
                     
-                    <div className="flex gap-4 pt-6 border-t border-slate-50 dark:border-white/5">
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500 px-1">
+                        The subscription amount is automatically calculated from the household member count × the year's registered rate.
+                    </p>
+
+                    <div className="flex gap-4 pt-4 border-t border-slate-50 dark:border-white/5">
                         <button type="button" onClick={() => setModal(false)} className="btn-secondary flex-1">Abort</button>
-                        <button type="submit" disabled={isSubmitting} className="btn-primary flex-1">
+                        <button type="submit" disabled={isSubmitting || rates.length === 0} className="btn-primary flex-1">
                             {isSubmitting ? 'Syncing...' : 'Authorize Subscription'}
                         </button>
                     </div>

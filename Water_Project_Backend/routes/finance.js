@@ -67,13 +67,19 @@ router.post('/rates', async (req, res) => {
 
 // GET /api/finance/subscriptions — get all subscriptions
 router.get('/subscriptions', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
-    const [subscriptions] = await db.query(
-      `SELECT * FROM v_subscription_status ORDER BY year DESC, zone, street_address`
-    );
+    const query = req.user.role === 'zonal_admin'
+      ? `SELECT * FROM v_subscription_status
+         WHERE household_id IN (
+           SELECT id FROM household WHERE zone_id = ?
+         )
+         ORDER BY year DESC, zone, street_address`
+      : `SELECT * FROM v_subscription_status ORDER BY year DESC, zone, street_address`;
+    const params = req.user.role === 'zonal_admin' ? [req.user.zone_id] : [];
+    const [subscriptions] = await db.query(query, params);
     res.status(200).json({ subscriptions });
   } catch (err) {
     console.error(err.message);
@@ -85,12 +91,21 @@ router.get('/subscriptions', async (req, res) => {
 router.get('/subscriptions/household/:id', async (req, res) => {
   try {
     // Representatives can only view their own household
-    if (req.user.role === 'representative') {
+    if (['representative', 'user'].includes(req.user.role)) {
       const [member] = await db.query(
         `SELECT household_id FROM community_member WHERE id = ?`,
         [req.user.member_id]
       );
       if (member.length === 0 || member[0].household_id !== parseInt(req.params.id)) {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
+    }
+    if (req.user.role === 'zonal_admin') {
+      const [households] = await db.query(
+        `SELECT zone_id FROM household WHERE id = ? AND deleted_at IS NULL`,
+        [req.params.id]
+      );
+      if (households.length === 0 || households[0].zone_id !== req.user.zone_id) {
         return res.status(403).json({ error: 'Access denied.' });
       }
     }
@@ -109,12 +124,22 @@ router.get('/subscriptions/household/:id', async (req, res) => {
 
 // POST /api/finance/subscriptions — create subscriptions for a year
 router.post('/subscriptions', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (req.user.role === 'user') {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { household_id, year } = req.body;
   if (!household_id || !year) {
     return res.status(400).json({ error: 'household_id and year are required.' });
+  }
+
+  if (req.user.role === 'representative') {
+    const [member] = await db.query(
+      `SELECT household_id FROM community_member WHERE id = ?`,
+      [req.user.member_id]
+    );
+    if (member.length === 0 || member[0].household_id !== parseInt(household_id)) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
   }
   try {
     // Get the rate for this year
@@ -132,6 +157,9 @@ router.post('/subscriptions', async (req, res) => {
     );
     if (households.length === 0) {
       return res.status(404).json({ error: 'Household not found.' });
+    }
+    if (req.user.role === 'zonal_admin' && households[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only create subscriptions for households in your zone.' });
     }
     const household = households[0];
     const amount_due = household.member_count * rate.rate_per_person;
@@ -176,24 +204,38 @@ router.post('/subscriptions', async (req, res) => {
 
 // GET /api/finance/payments — get all payments
 router.get('/payments', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
-    const [payments] = await db.query(
-      `SELECT sp.*,
+    const query = req.user.role === 'zonal_admin'
+      ? `SELECT sp.*,
               h.street_address, h.house_number,
               z.name AS zone_name,
               s.year, s.amount_due,
               CONCAT(cm.first_name, ' ', cm.last_name) AS received_by_name
-       FROM subscription_payment sp
-       JOIN subscription s         ON s.id  = sp.subscription_id
-       JOIN household h            ON h.id  = s.household_id
-       JOIN water_zone z           ON z.id  = h.zone_id
-       LEFT JOIN committee_member cmt ON cmt.id = sp.received_by
-       LEFT JOIN community_member cm  ON cm.id  = cmt.member_id
-       ORDER BY sp.payment_date DESC`
-    );
+         FROM subscription_payment sp
+         JOIN subscription s         ON s.id  = sp.subscription_id
+         JOIN household h            ON h.id  = s.household_id
+         JOIN water_zone z           ON z.id  = h.zone_id
+         LEFT JOIN committee_member cmt ON cmt.id = sp.received_by
+         LEFT JOIN community_member cm  ON cm.id  = cmt.member_id
+         WHERE h.zone_id = ?
+         ORDER BY sp.payment_date DESC`
+      : `SELECT sp.*,
+              h.street_address, h.house_number,
+              z.name AS zone_name,
+              s.year, s.amount_due,
+              CONCAT(cm.first_name, ' ', cm.last_name) AS received_by_name
+         FROM subscription_payment sp
+         JOIN subscription s         ON s.id  = sp.subscription_id
+         JOIN household h            ON h.id  = s.household_id
+         JOIN water_zone z           ON z.id  = h.zone_id
+         LEFT JOIN committee_member cmt ON cmt.id = sp.received_by
+         LEFT JOIN community_member cm  ON cm.id  = cmt.member_id
+         ORDER BY sp.payment_date DESC`;
+    const params = req.user.role === 'zonal_admin' ? [req.user.zone_id] : [];
+    const [payments] = await db.query(query, params);
     res.status(200).json({ payments });
   } catch (err) {
     console.error(err.message);
@@ -204,6 +246,18 @@ router.get('/payments', async (req, res) => {
 // GET /api/finance/payments/subscription/:id — get payments for one subscription
 router.get('/payments/subscription/:id', async (req, res) => {
   try {
+    if (req.user.role === 'zonal_admin') {
+      const [subscriptions] = await db.query(
+        `SELECT h.zone_id
+         FROM subscription s
+         JOIN household h ON h.id = s.household_id
+         WHERE s.id = ?`,
+        [req.params.id]
+      );
+      if (subscriptions.length === 0 || subscriptions[0].zone_id !== req.user.zone_id) {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
+    }
     const [payments] = await db.query(
       `SELECT sp.*,
               CONCAT(cm.first_name, ' ', cm.last_name) AS received_by_name
@@ -223,7 +277,7 @@ router.get('/payments/subscription/:id', async (req, res) => {
 
 // POST /api/finance/payments — record a payment
 router.post('/payments', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (req.user.role === 'user') {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { subscription_id, amount, payment_date,
@@ -233,13 +287,30 @@ router.post('/payments', async (req, res) => {
       error: 'subscription_id, amount and payment_date are required.'
     });
   }
+
+  if (req.user.role === 'representative') {
+    const [member] = await db.query(
+      `SELECT household_id FROM community_member WHERE id = ?`,
+      [req.user.member_id]
+    );
+    const [sub] = await db.query(`SELECT household_id FROM subscription WHERE id = ?`, [subscription_id]);
+    if (member.length === 0 || sub.length === 0 || member[0].household_id !== sub[0].household_id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+  }
   try {
     // Check subscription exists
     const [subscriptions] = await db.query(
-      `SELECT * FROM subscription WHERE id = ?`, [subscription_id]
+      `SELECT s.*, h.zone_id
+       FROM subscription s
+       JOIN household h ON h.id = s.household_id
+       WHERE s.id = ?`, [subscription_id]
     );
     if (subscriptions.length === 0) {
       return res.status(404).json({ error: 'Subscription not found.' });
+    }
+    if (req.user.role === 'zonal_admin' && subscriptions[0].zone_id !== req.user.zone_id) {
+      return res.status(403).json({ error: 'You can only add payments for subscriptions in your zone.' });
     }
 
     // Check payment does not exceed balance
@@ -284,7 +355,7 @@ router.post('/payments', async (req, res) => {
 
 // GET /api/finance/maintenance — get all maintenance jobs
 router.get('/maintenance', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -300,7 +371,7 @@ router.get('/maintenance', async (req, res) => {
 
 // GET /api/finance/maintenance/:id — get one maintenance job with cost breakdown
 router.get('/maintenance/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -323,7 +394,7 @@ router.get('/maintenance/:id', async (req, res) => {
 });
 // POST /api/finance/maintenance — create a maintenance job
 router.post('/maintenance', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { tap_id, tank_id, title, description,
@@ -361,7 +432,7 @@ router.post('/maintenance', async (req, res) => {
 
 // PUT /api/finance/maintenance/:id — update a maintenance job
 router.put('/maintenance/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -404,7 +475,7 @@ router.put('/maintenance/:id', async (req, res) => {
 
 // POST /api/finance/maintenance/:id/costs — add a cost line to a job
 router.post('/maintenance/:id/costs', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { description, quantity, unit_cost } = req.body;
@@ -474,7 +545,7 @@ router.post('/categories', async (req, res) => {
 
 // GET /api/finance/expenditures — get all expenditures
 router.get('/expenditures', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -500,7 +571,7 @@ router.get('/expenditures', async (req, res) => {
 
 // POST /api/finance/expenditures — record an expenditure
 router.post('/expenditures', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { category_id, description, amount, expenditure_date,
@@ -536,7 +607,7 @@ router.post('/expenditures', async (req, res) => {
 
 // PUT /api/finance/expenditures/:id — update an expenditure
 router.put('/expenditures/:id', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -589,7 +660,7 @@ router.put('/expenditures/:id', async (req, res) => {
 
 // GET /api/finance/committee-payments — get all committee payments
 router.get('/committee-payments', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -616,7 +687,7 @@ router.get('/committee-payments', async (req, res) => {
 
 // POST /api/finance/committee-payments — record a committee payment
 router.post('/committee-payments', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   const { committee_member_id, payment_type, amount, payment_date,
@@ -657,7 +728,7 @@ router.post('/committee-payments', async (req, res) => {
 
 // GET /api/finance/summary — annual income vs expenditure
 router.get('/summary', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
@@ -673,7 +744,7 @@ router.get('/summary', async (req, res) => {
 
 // GET /api/finance/summary/:year — summary for a specific year
 router.get('/summary/:year', async (req, res) => {
-  if (req.user.role === 'representative') {
+  if (['representative', 'user'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {

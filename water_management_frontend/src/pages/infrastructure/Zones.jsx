@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { Plus, Pencil, Trash2, Waves, Search, Building2, Droplets, MapPin, ArrowRight } from 'lucide-react';
 import { zoneAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import PageHeader from '../../components/ui/PageHeader';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
@@ -18,6 +20,8 @@ export default function Zones() {
     const [deleting, setDeleting] = useState(null);
 
     const { register, handleSubmit, reset, setValue, formState: { errors, isSubmitting } } = useForm();
+    const { user } = useAuth();
+    const navigate = useNavigate();
 
     const load = async () => {
         try {
@@ -193,10 +197,21 @@ export default function Zones() {
 
                                 {/* View Details Overlay/Button */}
                                 <div className="p-4 pt-1">
+                                    <div className="space-y-3">
                                     <button className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white dark:bg-navy-950 border border-slate-100 dark:border-white/5 hover:border-navy-950/20 dark:hover:border-gold-500/20 text-slate-500 hover:text-navy-950 dark:hover:text-gold-400 font-black text-[11px] uppercase tracking-widest transition-all">
                                         View Sector Vitals
                                         <ArrowRight size={14} />
                                     </button>
+                                    {user?.role === 'system_admin' && (
+                                        <button
+                                            onClick={() => navigate(`/people/users?zone_id=${zone.id}`)}
+                                            className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 font-black text-[11px] uppercase tracking-widest transition-all"
+                                        >
+                                            View Zonal Admins
+                                            <ArrowRight size={14} />
+                                        </button>
+                                    )}
+                                </div>
                                 </div>
                             </motion.div>
                         ))}

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { Plus, Trash2, Settings, Search, ShieldCheck } from 'lucide-react';
-import { userAPI, memberAPI } from '../../services/api';
+import { userAPI, memberAPI, zoneAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import PageHeader from '../../components/ui/PageHeader';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
@@ -12,22 +14,40 @@ import toast from 'react-hot-toast';
 export default function Users() {
     const [users, setUsers] = useState([]);
     const [members, setMembers] = useState([]);
+    const [zones, setZones] = useState([]);
+    const [selectedZoneId, setSelectedZoneId] = useState('');
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [modal, setModal] = useState(false);
     const [deleting, setDeleting] = useState(null);
 
     const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm();
+    const { user } = useAuth();
+    const navigate = useNavigate();
+    const location = useLocation();
 
     const load = async () => {
         try {
-            const [u, m] = await Promise.all([userAPI.getAll(), memberAPI.getAll()]);
-            setUsers(u.data.users || []);
+            const [u, m, z] = await Promise.all([userAPI.getAll(), memberAPI.getAll(), zoneAPI.getAll()]);
+            const zoneMap = Object.fromEntries((z.data.zones || []).map(zone => [zone.id, zone.name]));
+            setUsers((u.data.users || []).map(user => ({
+                ...user,
+                zone_name: user.zone_id ? zoneMap[user.zone_id] : 'Unassigned',
+            })));
             setMembers(m.data.members?.filter(m => m.is_representative) || []);
+            setZones(z.data.zones || []);
         } catch { toast.error('Failed to load users'); }
         finally { setLoading(false); }
     };
     useEffect(() => { load(); }, []);
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const zoneId = params.get('zone_id') || '';
+        if (zoneId !== selectedZoneId) {
+            setSelectedZoneId(zoneId);
+        }
+    }, [location.search]);
 
     const onSubmit = async (data) => {
         try {
@@ -44,10 +64,14 @@ export default function Users() {
         } catch (e) { toast.error(e.response?.data?.error || 'Cannot delete user'); }
     };
 
-    const filtered = users.filter(u =>
-        `${u.username} ${u.email} ${u.role}`
-            .toLowerCase().includes(search.toLowerCase())
-    );
+    const filtered = users.filter(u => {
+        const matchesSearch = `${u.username} ${u.email} ${u.role}`
+            .toLowerCase().includes(search.toLowerCase());
+
+        if (!matchesSearch) return false;
+        if (!selectedZoneId) return true;
+        return u.zone_id === parseInt(selectedZoneId) && u.role === 'zonal_admin';
+    });
 
     const roleColors = {
         system_admin: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
@@ -68,10 +92,31 @@ export default function Users() {
                 }
             />
 
-            <div className="relative mb-4">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                <input value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="Search users..." className="input pl-9" />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] mb-4">
+                <div className="relative">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input value={search} onChange={e => setSearch(e.target.value)}
+                        placeholder="Search users..." className="input pl-9" />
+                </div>
+                {user?.role === 'system_admin' && (
+                    <div>
+                        <label className="label mb-2">Filter by Zone</label>
+                        <select
+                            value={selectedZoneId}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                setSelectedZoneId(value);
+                                navigate(value ? `/people/users?zone_id=${value}` : '/people/users');
+                            }}
+                            className="input"
+                        >
+                            <option value="">All zones (show all users)</option>
+                            {zones.map((zone) => (
+                                <option key={zone.id} value={zone.id}>{zone.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
             </div>
 
             {loading ? <div className="flex justify-center py-20"><Spinner /></div>
@@ -87,6 +132,7 @@ export default function Users() {
                                     <th className="text-left px-4 py-3">Username</th>
                                     <th className="text-left px-4 py-3 hidden sm:table-cell">Email</th>
                                     <th className="text-left px-4 py-3">Role</th>
+                                    <th className="text-left px-4 py-3 hidden md:table-cell">Zone</th>
                                     <th className="text-left px-4 py-3 hidden md:table-cell">Status</th>
                                     <th className="px-4 py-3"></th>
                                 </tr>
@@ -113,6 +159,9 @@ export default function Users() {
                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[u.role] || ''}`}>
                                                 {u.role?.replace('_', ' ')}
                                             </span>
+                                        </td>
+                                        <td className="px-4 py-3 hidden md:table-cell">
+                                            {u.zone_name || 'N/A'}
                                         </td>
                                         <td className="px-4 py-3 hidden md:table-cell">
                                             <span className={u.is_active ? 'badge-active' : 'badge-inactive'}>
@@ -181,7 +230,7 @@ export default function Users() {
 
             <Modal open={!!deleting} onClose={() => setDeleting(null)} title="Delete User" size="sm">
                 <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
-                    Delete user <strong>{u.username}</strong>?
+                    Delete user <strong>{deleting?.username}</strong>?
                 </p>
                 <div className="flex gap-3">
                     <button onClick={() => setDeleting(null)} className="btn-secondary flex-1">Cancel</button>

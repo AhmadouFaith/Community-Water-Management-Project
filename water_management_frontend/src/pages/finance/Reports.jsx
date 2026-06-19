@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FileBarChart2, Download, FileText, Users, Wrench, AlertCircle, CreditCard, Calendar, FileType, ArrowRight } from 'lucide-react';
+import { FileBarChart2, Download, FileText, Users, Wrench, AlertCircle, CreditCard, Calendar, FileType, ArrowRight, Home } from 'lucide-react';
 import { reportAPI, householdAPI } from '../../services/api';
 import PageHeader from '../../components/ui/PageHeader';
 import toast from 'react-hot-toast';
@@ -73,8 +73,8 @@ export default function Reports() {
                         <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-4">Fiscal Window</label>
                         <div className="relative group min-w-[200px]">
                             <Calendar size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-navy-900 dark:group-focus-within:text-gold-500 transition-colors pointer-events-none" />
-                            <select 
-                                value={year} 
+                            <select
+                                value={year}
                                 onChange={e => setYear(Number(e.target.value))}
                                 className="input pl-12 bg-white dark:bg-black/40 border-slate-200"
                             >
@@ -87,8 +87,8 @@ export default function Reports() {
                         <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-4">Output Standard</label>
                         <div className="relative group min-w-[150px]">
                             <FileType size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-navy-900 dark:group-focus-within:text-gold-500 transition-colors pointer-events-none" />
-                            <select 
-                                value={format} 
+                            <select
+                                value={format}
                                 onChange={e => setFormat(e.target.value)}
                                 className="input pl-12 bg-white dark:bg-black/40 border-slate-200"
                             >
@@ -198,11 +198,11 @@ export default function Reports() {
                                     <select
                                         value={householdId}
                                         onChange={e => setHouseholdId(e.target.value)}
-                                        className="input pl-12 bg-slate-50 dark:bg-white/5 border-slate-200"
+                                        className="input pl-12 bg-slate-50 dark:bg-white/5 border-slate-200 text-black"
                                     >
-                                        <option value="">Select account residency...</option>
+                                        <option value="" >Select account residency...</option>
                                         {households.map(h => (
-                                            <option key={h.id} value={h.id}>
+                                            <option key={h.id} value={h.id} className="text-white">
                                                 {h.house_number} — {h.street_address}
                                             </option>
                                         ))}
