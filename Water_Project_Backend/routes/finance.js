@@ -162,7 +162,16 @@ router.post('/subscriptions', async (req, res) => {
       return res.status(403).json({ error: 'You can only create subscriptions for households in your zone.' });
     }
     const household = households[0];
-    const amount_due = household.member_count * rate.rate_per_person;
+    
+    // Calculate prorated amount based on remaining months in the year
+    let monthsLeft = 12;
+    const currentYear = new Date().getFullYear();
+    if (year == currentYear) {
+      monthsLeft = 12 - new Date().getMonth(); // e.g. June (5) -> 7 months left
+    }
+    
+    const annualAmount = household.member_count * rate.rate_per_person;
+    const amount_due = Math.ceil((annualAmount / 12) * monthsLeft);
 
     const [result] = await db.query(
       `INSERT INTO subscription
@@ -348,6 +357,105 @@ router.post('/payments', async (req, res) => {
   }
 });
 
+// POST /api/finance/fapshi/pay — initiate Fapshi payment
+router.post('/fapshi/pay', async (req, res) => {
+  if (req.user.role === 'user') {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+  const { subscription_id, amount } = req.body;
+  if (!subscription_id || !amount) {
+    return res.status(400).json({ error: 'subscription_id and amount are required.' });
+  }
+
+  try {
+    const [subscriptions] = await db.query(
+      `SELECT s.* FROM subscription s WHERE s.id = ?`, [subscription_id]
+    );
+    if (subscriptions.length === 0) {
+      return res.status(404).json({ error: 'Subscription not found.' });
+    }
+
+    const externalId = `SUB-${subscription_id}-${Date.now()}`;
+
+    // Fapshi API headers
+    const headers = {
+      'apiuser': process.env.FAPSHI_API_USER,
+      'apikey': process.env.FAPSHI_API_KEY,
+      'Content-Type': 'application/json'
+    };
+
+    // Fapshi Request payload
+    const payload = {
+      amount: parseInt(amount, 10),
+      email: req.user.email || 'user@example.com',
+      externalId: externalId,
+      redirectUrl: 'http://localhost:5173/finance/subscriptions?status=success'
+    };
+
+    // Fapshi URL fallback
+    const baseUrl = process.env.FAPSHI_BASE_URL || 'https://fapshi.com/api';
+    
+    // We use dynamic import for fetch since node 18+ has it natively, 
+    // or just assume node 18+ global fetch.
+    const response = await fetch(`${baseUrl}/initiate-pay`, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to initiate Fapshi payment');
+    }
+
+    // Save temporary transaction log to verify in webhook
+    await db.query(
+      `INSERT INTO audit_log (user_id, action, table_name, record_id, new_values, ip_address)
+       VALUES (?, 'fapshi_initiate', 'subscription', ?, ?, ?)`,
+      [req.user.id, subscription_id, JSON.stringify({ externalId, amount }), getClientIp(req)]
+    );
+
+    res.status(200).json({ link: data.link, transId: data.transId });
+  } catch (err) {
+    console.error('Fapshi initiate error:', err.message);
+    res.status(500).json({ error: 'Failed to connect to Fapshi gateway.' });
+  }
+});
+
+// POST /api/finance/fapshi/webhook — Handle Fapshi Webhook
+router.post('/fapshi/webhook', async (req, res) => {
+  const { transId, externalId, status, amount } = req.body;
+  
+  if (!transId || !externalId) {
+    return res.status(400).send('Invalid webhook payload');
+  }
+
+  try {
+    if (status === 'SUCCESSFUL') {
+      const parts = externalId.split('-');
+      const subscription_id = parts[1];
+      
+      // Check if already paid to prevent duplicate
+      const [existing] = await db.query(
+        `SELECT id FROM subscription_payment WHERE reference = ?`, [transId]
+      );
+
+      if (existing.length === 0) {
+        await db.query(
+          `INSERT INTO subscription_payment
+             (subscription_id, amount, payment_date, payment_method, reference, received_by)
+           VALUES (?, ?, CURDATE(), 'mobile_money', ?, NULL)`,
+          [subscription_id, amount, transId]
+        );
+      }
+    }
+    
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('Webhook processing error:', err.message);
+    res.status(500).send('Internal Server Error');
+  }
+});
 
 // ============================================================
 // MAINTENANCE WORK
@@ -748,16 +856,27 @@ router.get('/summary/:year', async (req, res) => {
     return res.status(403).json({ error: 'Access denied.' });
   }
   try {
-    const [summary] = await db.query(
-      `SELECT * FROM v_annual_finance WHERE yr = ?`, [req.params.year]
-    );
-    if (summary.length === 0) {
-      return res.status(404).json({ error: `No financial data found for year ${req.params.year}.` });
+    const isZonal = req.user.role === 'zonal_admin';
+    const year = req.params.year;
+    
+    let finance_summary = { yr: year, total_income: 0, total_expenditure: 0, balance: 0 };
+
+    if (isZonal) {
+      const [inc] = await db.query(
+        `SELECT SUM(amount_paid) as total_income FROM v_subscription_status 
+         WHERE year = ? AND household_id IN (SELECT id FROM household WHERE zone_id = ?)`,
+        [year, req.user.zone_id]
+      );
+      finance_summary.total_income = inc[0].total_income || 0;
+      finance_summary.balance = finance_summary.total_income;
+    } else {
+      const [summary] = await db.query(
+        `SELECT * FROM v_annual_finance WHERE yr = ?`, [year]
+      );
+      if (summary.length > 0) finance_summary = summary[0];
     }
 
-    // Subscription breakdown for this year
-    const [subscriptionStats] = await db.query(
-      `SELECT
+    let subStatsQuery = `SELECT
          COUNT(*)                                      AS total_households,
          SUM(amount_due)                               AS total_billed,
          SUM(amount_paid)                              AS total_collected,
@@ -766,24 +885,29 @@ router.get('/summary/:year', async (req, res) => {
          SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partial_count,
          SUM(CASE WHEN status = 'unpaid'  THEN 1 ELSE 0 END) AS unpaid_count
        FROM v_subscription_status
-       WHERE year = ?`,
-      [req.params.year]
-    );
+       WHERE year = ?`;
+    let subStatsParams = [year];
 
-    // Expenditure breakdown for this year
-    const [expenditureStats] = await db.query(
+    if (isZonal) {
+      subStatsQuery += ` AND household_id IN (SELECT id FROM household WHERE zone_id = ?)`;
+      subStatsParams.push(req.user.zone_id);
+    }
+    
+    const [subscriptionStats] = await db.query(subStatsQuery, subStatsParams);
+
+    const [expenditureStats] = isZonal ? [[]] : await db.query(
       `SELECT ec.name AS category, SUM(e.amount) AS total
        FROM expenditure e
        JOIN expenditure_category ec ON ec.id = e.category_id
        WHERE YEAR(e.expenditure_date) = ?
        GROUP BY ec.name
        ORDER BY total DESC`,
-      [req.params.year]
+      [year]
     );
 
     res.status(200).json({
-      year:                req.params.year,
-      finance_summary:     summary[0],
+      year:                year,
+      finance_summary:     finance_summary,
       subscription_stats:  subscriptionStats[0],
       expenditure_by_category: expenditureStats
     });
